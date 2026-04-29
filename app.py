@@ -9,7 +9,7 @@ from ta.momentum import RSIIndicator
 from streamlit_autorefresh import st_autorefresh
 
 # =========================
-# EXPANDED UNIVERSE (SMALL CAPS + MEME + LOW FLOAT TYPE TICKERS)
+# UNIVERSE
 # =========================
 UNIVERSE = [
     "SNDL","NOK","BB","PLUG","SOFI","RIOT","MARA","CLSK","FUBO","OPEN",
@@ -18,9 +18,9 @@ UNIVERSE = [
 ]
 
 # =========================
-# APP UI
+# UI SETUP
 # =========================
-st.set_page_config(page_title="Penny Stock Momentum Scanner", layout="wide")
+st.set_page_config(page_title="Penny Stock Scanner", layout="wide")
 
 st.markdown("""
 <style>
@@ -29,12 +29,12 @@ h1,h2,h3 { color:#00ffcc; }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📊 Penny Stock Momentum Scanner (≤ $10 Focus)")
+st.title("📊 Penny Stock Momentum Scanner (≤ $10)")
 
 st_autorefresh(interval=60000, key="refresh")
 
 # =========================
-# MARKET SESSION
+# SESSION
 # =========================
 def session_state():
     now = datetime.now(pytz.timezone("US/Eastern")).time()
@@ -48,7 +48,7 @@ def session_state():
 st.info(f"🕒 Market Session: {session_state()}")
 
 # =========================
-# DATA FETCH
+# DATA
 # =========================
 def get_data(ticker):
     try:
@@ -61,7 +61,7 @@ def get_data(ticker):
         return None
 
 # =========================
-# HARD PRICE FILTER (≤ $10 ONLY)
+# PRICE FILTER
 # =========================
 def price_ok(df):
     try:
@@ -70,33 +70,14 @@ def price_ok(df):
         return False
 
 # =========================
-# GAP PERCENT
+# COMPANY NAME FIX (IMPORTANT)
 # =========================
-def gap_percent(df):
+def get_name(ticker):
     try:
-        prev = df["Close"].iloc[0]
-        last = df["Close"].iloc[-1]
-        return ((last - prev) / prev) * 100
+        info = yf.Ticker(ticker).info
+        return info.get("shortName") or info.get("longName") or ticker
     except:
-        return 0
-
-# =========================
-# VOLUME SURGE
-# =========================
-def volume_surge(df):
-    try:
-        return df["Volume"].iloc[-1] > df["Volume"].mean() * 2
-    except:
-        return False
-
-# =========================
-# LIQUIDITY FILTER
-# =========================
-def liquidity_ok(df):
-    try:
-        return df["Volume"].mean() > 250000
-    except:
-        return False
+        return ticker
 
 # =========================
 # INDICATORS
@@ -108,7 +89,36 @@ def indicators(df):
     return df
 
 # =========================
-# ADVANCED SCORE ENGINE
+# GAP
+# =========================
+def gap_percent(df):
+    try:
+        prev = df["Close"].iloc[0]
+        last = df["Close"].iloc[-1]
+        return ((last - prev) / prev) * 100
+    except:
+        return 0
+
+# =========================
+# VOLUME
+# =========================
+def volume_surge(df):
+    try:
+        return df["Volume"].iloc[-1] > df["Volume"].mean() * 2
+    except:
+        return False
+
+# =========================
+# LIQUIDITY
+# =========================
+def liquidity_ok(df):
+    try:
+        return df["Volume"].mean() > 250000
+    except:
+        return False
+
+# =========================
+# SCORE ENGINE
 # =========================
 def score_engine(df):
     last = df.iloc[-1]
@@ -118,27 +128,22 @@ def score_engine(df):
 
     gap = gap_percent(df)
 
-    # GAP FILTER (IMPORTANT FOR RUNNERS)
     if gap > 5:
         score += 3
         reasons.append(f"Strong gap {gap:.2f}%")
 
-    # BREAKOUT STRUCTURE
     if last["Close"] > df["Close"].rolling(20).max().iloc[-2]:
         score += 3
         reasons.append("Breakout structure")
 
-    # VOLUME SURGE
     if volume_surge(df):
         score += 3
         reasons.append("Volume surge")
 
-    # RSI MOMENTUM
     if 50 < last["RSI"] < 70:
         score += 2
         reasons.append("Healthy RSI momentum")
 
-    # LIQUIDITY CHECK
     if liquidity_ok(df):
         score += 2
     else:
@@ -154,13 +159,11 @@ def trade_levels(df):
     entry = df["Close"].iloc[-1]
     stop = df["Low"].rolling(10).min().iloc[-1]
     target = entry + (2 * (entry - stop))
-
     pct = ((target - entry) / entry) * 100
-
     return entry, stop, target, pct
 
 # =========================
-# MAIN SCANNER
+# MAIN LOOP
 # =========================
 results = []
 
@@ -170,7 +173,6 @@ for t in UNIVERSE:
     if df is None:
         continue
 
-    # 🚨 STRICT FILTERS
     if not price_ok(df):
         continue
 
@@ -187,10 +189,12 @@ for t in UNIVERSE:
     if score < 5:
         continue
 
+    name = get_name(t)
     entry, stop, target, pct = trade_levels(df)
 
     results.append({
         "ticker": t,
+        "name": name,
         "score": score,
         "entry": entry,
         "stop": stop,
@@ -205,16 +209,16 @@ for t in UNIVERSE:
 results = sorted(results, key=lambda x: x["score"], reverse=True)
 
 # =========================
-# UI DISPLAY
+# UI
 # =========================
-st.subheader("🔥 High-Probability Penny Stock Setups")
+st.subheader("🔥 High-Probability Setups")
 
 for r in results:
 
     st.markdown(f"""
-    ## 📌 {r['ticker']}
+    ## 📌 {r['ticker']} — {r['name']}
 
-    **Score: {r['score']} — Setup Strength Index**
+    **Score: {r['score']}**
 
     Entry: {round(r['entry'],2)}  
     Target: {round(r['target'],2)}  
@@ -223,7 +227,7 @@ for r in results:
     💰 Potential Gain: +{round(r['pct'],2)}%
     """)
 
-    st.write("📊 Setup Reasons:")
+    st.write("📊 Setup reasons:")
     for x in r["reasons"]:
         st.write("-", x)
 
