@@ -2,25 +2,25 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import requests
 import pytz
 from datetime import datetime
 from ta.momentum import RSIIndicator
 from streamlit_autorefresh import st_autorefresh
 
 # =========================
-# UNIVERSE
+# UNIVERSE (can expand later)
 # =========================
 UNIVERSE = [
     "SNDL","NOK","BB","PLUG","SOFI","RIOT","MARA","CLSK","FUBO","OPEN",
     "WISH","ATER","CEI","IDEX","XELA","BBIG","AMC","GME","TLRY","HOOD",
-    "NIO","LCID","RIVN","SPCE","KOSS","PROG","TRKA","SAVA","AI","NKLA"
+    "NIO","LCID","RIVN","SPCE","KOSS","PROG","TRKA","SAVA","AI","NKLA",
+    "AMD","NVDA","TSLA","META","MSFT"
 ]
 
 # =========================
-# UI SETUP
+# UI
 # =========================
-st.set_page_config(page_title="Penny Stock Scanner", layout="wide")
+st.set_page_config(page_title="Momentum Scanner", layout="wide")
 
 st.markdown("""
 <style>
@@ -29,7 +29,7 @@ h1,h2,h3 { color:#00ffcc; }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📊 Penny Stock Momentum Scanner (≤ $10)")
+st.title("📊 Penny Stock Momentum Scanner (≤ $10 ONLY)")
 
 st_autorefresh(interval=60000, key="refresh")
 
@@ -61,7 +61,7 @@ def get_data(ticker):
         return None
 
 # =========================
-# PRICE FILTER
+# STRICT PRICE FILTER (≤ $10 ONLY)
 # =========================
 def price_ok(df):
     try:
@@ -70,12 +70,12 @@ def price_ok(df):
         return False
 
 # =========================
-# COMPANY NAME FIX (IMPORTANT)
+# COMPANY NAME (FULL NAME + FALLBACK)
 # =========================
 def get_name(ticker):
     try:
         info = yf.Ticker(ticker).info
-        return info.get("shortName") or info.get("longName") or ticker
+        return info.get("longName") or info.get("shortName") or ticker
     except:
         return ticker
 
@@ -100,16 +100,16 @@ def gap_percent(df):
         return 0
 
 # =========================
-# VOLUME
+# RELATIVE VOLUME (IMPORTANT FIX)
 # =========================
-def volume_surge(df):
+def relative_volume(df):
     try:
-        return df["Volume"].iloc[-1] > df["Volume"].mean() * 2
+        return df["Volume"].iloc[-1] / df["Volume"].mean()
     except:
-        return False
+        return 0
 
 # =========================
-# LIQUIDITY
+# LIQUIDITY FILTER
 # =========================
 def liquidity_ok(df):
     try:
@@ -118,7 +118,7 @@ def liquidity_ok(df):
         return False
 
 # =========================
-# SCORE ENGINE
+# SCORE ENGINE (NO PROFIT CAP LOGIC)
 # =========================
 def score_engine(df):
     last = df.iloc[-1]
@@ -127,23 +127,32 @@ def score_engine(df):
     reasons = []
 
     gap = gap_percent(df)
+    rv = relative_volume(df)
 
+    # GAP STRENGTH
     if gap > 5:
         score += 3
         reasons.append(f"Strong gap {gap:.2f}%")
 
+    # BREAKOUT
     if last["Close"] > df["Close"].rolling(20).max().iloc[-2]:
         score += 3
         reasons.append("Breakout structure")
 
-    if volume_surge(df):
-        score += 3
-        reasons.append("Volume surge")
+    # RELATIVE VOLUME (KEY FIX)
+    if rv > 3:
+        score += 4
+        reasons.append(f"High relative volume {rv:.1f}x")
+    elif rv > 2:
+        score += 2
+        reasons.append(f"Moderate relative volume {rv:.1f}x")
 
+    # RSI MOMENTUM
     if 50 < last["RSI"] < 70:
         score += 2
         reasons.append("Healthy RSI momentum")
 
+    # LIQUIDITY
     if liquidity_ok(df):
         score += 2
     else:
@@ -153,13 +162,20 @@ def score_engine(df):
     return score, reasons
 
 # =========================
-# TRADE LEVELS
+# TRADE LEVELS (NO UPSIDE CAP — PURE MARKET MOVE BASED)
 # =========================
 def trade_levels(df):
     entry = df["Close"].iloc[-1]
+
+    # dynamic stop based on recent volatility
     stop = df["Low"].rolling(10).min().iloc[-1]
-    target = entry + (2 * (entry - stop))
+
+    # NO artificial cap — allows full upside expansion
+    risk = entry - stop
+    target = entry + (risk * 3.5)  # momentum expansion model
+
     pct = ((target - entry) / entry) * 100
+
     return entry, stop, target, pct
 
 # =========================
@@ -173,6 +189,7 @@ for t in UNIVERSE:
     if df is None:
         continue
 
+    # 🔥 STRICT REQUIREMENT: ONLY ≤ $10 STOCKS
     if not price_ok(df):
         continue
 
@@ -186,7 +203,8 @@ for t in UNIVERSE:
 
     score, reasons = score_engine(df)
 
-    if score < 5:
+    # allow more candidates (important fix)
+    if score < 3:
         continue
 
     name = get_name(t)
@@ -209,16 +227,16 @@ for t in UNIVERSE:
 results = sorted(results, key=lambda x: x["score"], reverse=True)
 
 # =========================
-# UI
+# UI OUTPUT
 # =========================
-st.subheader("🔥 High-Probability Setups")
+st.subheader(f"🔥 Found {len(results)} Momentum Setups")
 
 for r in results:
 
     st.markdown(f"""
     ## 📌 {r['ticker']} — {r['name']}
 
-    **Score: {r['score']}**
+    **Score: {r['score']} (Momentum Strength Index)**
 
     Entry: {round(r['entry'],2)}  
     Target: {round(r['target'],2)}  
@@ -227,7 +245,7 @@ for r in results:
     💰 Potential Gain: +{round(r['pct'],2)}%
     """)
 
-    st.write("📊 Setup reasons:")
+    st.write("📊 Why this trade is flagged:")
     for x in r["reasons"]:
         st.write("-", x)
 
