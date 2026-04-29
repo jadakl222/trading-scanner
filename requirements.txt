@@ -1,0 +1,11 @@
+streamlit
+yfinance
+pandas
+numpy
+ta
+requests
+feedparser
+beautifulsoup4
+lxml
+pytz
+streamlit-autorefresh
